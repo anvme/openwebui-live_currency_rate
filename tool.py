@@ -4,9 +4,9 @@ author: anvme
 author_url: https://anvcore.com
 github: https://github.com/anvme/
 github_repo: https://github.com/anvme/openwebui-live_currency_rate
-version: 0.1.0
+version: 0.1.1
 requirements: requests, packaging
-description: 
+description:
     Tool to get live currency rates and convert between fiat and cryptocurrencies.
 """
 
@@ -36,7 +36,7 @@ class Tools:
 
     # Configuration - update these for your tool
     EXT_TITLE = "Live Currency Rate"
-    CURRENT_VERSION = "0.1.0"
+    CURRENT_VERSION = "0.1.1"
     GITHUB_USER = "anvme"
     GITHUB_REPO = "openwebui-live_currency_rate"
     EXT_PATH = f"t/anvme/live_currency_rate"
@@ -51,7 +51,9 @@ class Tools:
         try:
             with open(self.DATA_FILE, "r") as f:
                 data = json.load(f)
-                data["last_check"] = datetime.fromisoformat(data.get("last_check", "2024-01-01"))
+                data["last_check"] = datetime.fromisoformat(
+                    data.get("last_check", "2024-01-01")
+                )
                 return data
         except (FileNotFoundError, json.JSONDecodeError, ValueError):
             return {
@@ -74,19 +76,19 @@ class Tools:
         try:
             url = f"https://api.github.com/repos/{self.GITHUB_USER}/{self.GITHUB_REPO}/releases/latest"
             response = requests.get(url, timeout=5)
-            
+
             if response.status_code == 200:
                 data = response.json()
                 new_version = data.get("tag_name", "").lstrip("v")
-                
+
                 version_changed = self.update_state["latest_version"] != new_version
-                
+
                 self.update_state["latest_version"] = new_version
                 self.update_state["latest_url"] = data.get("html_url", "")
-                
+
                 if version_changed:
                     self.update_state["has_shown_notification"] = False
-                    
+
         except (requests.RequestException, json.JSONDecodeError, KeyError):
             pass
         finally:
@@ -96,39 +98,43 @@ class Tools:
     def _get_update_notification(self) -> str:
         if not self.update_state["latest_version"]:
             return ""
-        
+
         try:
-            if version.parse(self.update_state["latest_version"]) > version.parse(self.CURRENT_VERSION):
+            if version.parse(self.update_state["latest_version"]) > version.parse(
+                self.CURRENT_VERSION
+            ):
                 github_url = f"https://github.com/{self.GITHUB_USER}/{self.GITHUB_REPO}"
                 ext_url = f"https://openwebui.com/{self.EXT_PATH}"
                 return (
-                    f"**🔔 {EXT_TITLE} Update Available!**\nVersion {self.update_state['latest_version']} is now available.\n"
+                    f"**🔔 {self.EXT_TITLE} Update Available!**\nVersion {self.update_state['latest_version']} is now available.\n"
                     f"Current version: {self.CURRENT_VERSION}\n"
                     f"📦 [GitHub]({github_url}) | 🔘 [OpenWebUI]({ext_url}) | 🗒️ [Release Notes]({github_url}/releases)\n"
                 )
         except (ValueError, TypeError):
             pass
-        
+
         return ""
 
     def _should_check_for_updates(self, user: dict) -> bool:
         if not self.valves.ENABLE_UPDATE_CHECK:
             return False
-        
+
         if not isinstance(user, dict) or user.get("role") != "admin":
             return False
-        
+
         time_since_check = datetime.now() - self.update_state["last_check"]
         return time_since_check >= timedelta(hours=24)
 
     async def _check_and_notify_updates(self, user: dict, event_emitter):
         if self._should_check_for_updates(user):
             self._check_github_release()
-        
+
         if not self.update_state["has_shown_notification"] and event_emitter:
             notification = self._get_update_notification()
             if notification:
-                await event_emitter({"type": "message", "data": {"content": notification}})
+                await event_emitter(
+                    {"type": "message", "data": {"content": notification}}
+                )
                 self.update_state["has_shown_notification"] = True
                 self._save_state()
 
@@ -224,6 +230,7 @@ class Tools:
         to_currency: Optional[str] = None,
         amount: Optional[float] = 1.0,
         __user__: dict = {},
+        __event_emitter__=None,
     ) -> str:
         """
         Convert between ANY currencies - works for ALL combinations of fiat and crypto.
@@ -244,6 +251,7 @@ class Tools:
         IMPORTANT: This tool can convert DIRECTLY between any two currencies.
         Do NOT do manual calculations - just call this tool with the correct parameters!
         """
+        await self._check_and_notify_updates(__user__, __event_emitter__)
         try:
             # Fetch rates
             data = self._fetch_rates()
@@ -342,7 +350,11 @@ class Tools:
             return f"❌ Error: {str(e)}"
 
     async def get_crypto_price(
-        self, crypto: str = "BTC", currency: str = "USD", __user__: dict = {}
+        self,
+        crypto: str = "BTC",
+        currency: str = "USD",
+        __user__: dict = {},
+        __event_emitter__=None,
     ) -> str:
         """
         Get current cryptocurrency price in any currency. This is a shortcut for convert_currency.
@@ -358,12 +370,16 @@ class Tools:
 
         NOTE: For conversions with amounts other than 1, use convert_currency instead.
         """
+        await self._check_and_notify_updates(__user__, __event_emitter__)
         return await self.convert_currency(
             from_currency=crypto, to_currency=currency, amount=1.0, __user__=__user__
         )
 
     async def list_currencies(
-        self, filter_type: Optional[str] = None, __user__: dict = {}
+        self,
+        filter_type: Optional[str] = None,
+        __user__: dict = {},
+        __event_emitter__=None,
     ) -> str:
         """
         List all available currencies.
@@ -371,6 +387,7 @@ class Tools:
         :param filter_type: Filter by type: 'crypto', 'fiat', or None for all
         :return: List of available currencies
         """
+        await self._check_and_notify_updates(__user__, __event_emitter__)
         try:
             data = self._fetch_rates()
             rates = data.get("rates", {})
